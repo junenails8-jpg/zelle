@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>多平台收款归总</title>
+<style>
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto;
+    margin: 0;
+    padding: 16px;
+    background: #fafafa;
+    color: #222;
+  }
+  h2 { margin-top: 0; }
+  textarea {
+    width: 100%; height: 120px; padding: 10px;
+    font-size: 15px; border: 1px solid #ccc; border-radius: 6px; resize: none;
+  }
+  button {
+    width: 100%; padding: 10px; margin-top: 8px;
+    background: #4a7afe; color: #fff; border: none; border-radius: 6px; font-size: 15px;
+  }
+  .summary-box {
+    background: #fff; padding: 10px; border-radius: 6px;
+    margin-top: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); font-size: 14px;
+  }
+  .summary-box div { margin: 2px 0; }
+  .search-box { margin-top: 10px; }
+  .search-box input {
+    width: 100%; padding: 8px; border-radius: 6px; border: 1px solid #ccc; font-size: 14px;
+  }
+  #recordList { margin-top: 10px; font-size: 14px; }
+  .date-header {
+    font-weight: bold; margin-top: 8px; padding-top: 4px;
+  }
+  .record {
+    display: grid;
+    grid-template-columns: 1fr 80px 70px 40px;
+    padding: 3px 0;
+    align-items: center;
+  }
+  .divider {
+    width: 100%; height: 1px; background: #e0e0e0; margin: 4px 0;
+  }
+  .source-tag {
+    font-size: 11px; font-weight: 600; padding: 2px 6px;
+    border-radius: 10px; text-align: center; color: #fff;
+  }
+  .src-zelle { background:#4a7afe; }
+  .src-cashapp { background:#2ecc71; }
+  .src-venmo { background:#9b59b6; }
+  .src-paypal { background:#f1c40f; color:#333; }
+  .del-btn {
+    background:#ff4d4f; color:#fff; border:none; border-radius:4px;
+    padding:2px 4px; font-size:12px;
+  }
+</style>
+</head>
+<body>
+
+<h2>多平台收款归总</h2>
+
+<textarea id="smsInput" placeholder="粘贴 Zelle / Cash App / Venmo / PayPal 收款短信"></textarea>
+<button onclick="processSMS()">解析并保存</button>
+
+<div class="search-box">
+  <input id="searchInput" placeholder="搜索：付款人 / 金额 / 日期 / 来源" oninput="render()" />
+</div>
+
+<div class="summary-box" id="summaryBox"></div>
+
+<h3>收款记录</h3>
+<div id="recordList"></div>
+
+<script>
+  let records = JSON.parse(localStorage.getItem("multiPayRecords") || "[]");
+
+  function saveRecords() {
+    localStorage.setItem("multiPayRecords", JSON.stringify(records));
+  }
+
+  function detectSource(line) {
+    const l = line.toLowerCase();
+    if (l.includes("zelle")) return "Zelle";
+    if (l.includes("cash app")) return "Cash App";
+    if (l.includes("venmo")) return "Venmo";
+    if (l.includes("paypal")) return "PayPal";
+    return "Other";
+  }
+
+  function extractAmount(line) {
+    const m = line.replace(/,/g,"").match(/\$?\s*([0-9]+(\.[0-9]{1,2})?)/);
+    return m ? parseFloat(m[1]) : null;
+  }
+
+  function extractPayer(line) {
+    // 尝试 from XXX / XXX sent you / from XXX via ...
+    let m = line.match(/from\s+([A-Za-z0-9 .'-]+)/i);
+    if (m) return m[1].trim();
+    m = line.match(/([A-Za-z0-9 .'-]+)\s+sent you/i);
+    if (m) return m[1].trim();
+    return "Unknown";
+  }
+
+  function processSMS() {
+    const text = document.getElementById("smsInput").value;
+    if (!text.trim()) return;
+    const lines = text.split("\n").map(l => l.trim()).filter(l => l);
+
+    const now = new Date();
+    const dateStr =
+      String(now.getMonth()+1).padStart(2,"0") + "/" +
+      String(now.getDate()).padStart(2,"0") + "/" +
+      now.getFullYear();
+
+    lines.forEach(line => {
+      const source = detectSource(line);
+      if (source === "Other") return; // 只收四个平台
+
+      const amount = extractAmount(line);
+      if (!amount) return;
+
+      const payer = extractPayer(line);
+
+      records.push({
+        id: Date.now() + Math.random(),
+        date: dateStr,
+        timestamp: Date.now(),
+        payer,
+        amount,
+        source,
+        raw: line
+      });
+    });
+
+    saveRecords();
+    document.getElementById("smsInput").value = "";
+    render();
+  }
+
+  function sourceClass(src) {
+    if (src === "Zelle") return "src-zelle";
+    if (src === "Cash App") return "src-cashapp";
+    if (src === "Venmo") return "src-venmo";
+    if (src === "PayPal") return "src-paypal";
+    return "";
+  }
+
+  function deleteRecord(id) {
+    records = records.filter(r => r.id !== id);
+    saveRecords();
+    render();
+  }
+
+  function render() {
+    const list = document.getElementById("recordList");
+    list.innerHTML = "";
+
+    const kw = document.getElementById("searchInput").value.toLowerCase();
+
+    const filtered = records.filter(r => {
+      return (
+        r.payer.toLowerCase().includes(kw) ||
+        r.date.includes(kw) ||
+        r.amount.toString().includes(kw) ||
+        r.source.toLowerCase().includes(kw)
+      );
+    });
+
+    const sorted = [...filtered].sort((a,b) => b.timestamp - a.timestamp);
+
+    let lastDate = "";
+    sorted.forEach((r, idx) => {
+      if (r.date !== lastDate) {
+        const d = document.createElement("div");
+        d.className = "date-header";
+        d.textContent = r.date;
+        list.appendChild(d);
+        lastDate = r.date;
+      }
+
+      const row = document.createElement("div");
+      row.className = "record";
+      row.innerHTML = `
+        <div>${r.payer}</div>
+        <div>$${r.amount.toFixed(2)}</div>
+        <div><span class="source-tag ${sourceClass(r.source)}">${r.source}</span></div>
+        <div><button class="del-btn" onclick="deleteRecord(${r.id})">删</button></div>
+      `;
+      list.appendChild(row);
+
+      const next = sorted[idx+1];
+      if (!next || next.date !== r.date) {
+        const div = document.createElement("div");
+        div.className = "divider";
+        list.appendChild(div);
+      }
+    });
+
+    updateSummary();
+  }
+
+  function updateSummary() {
+    const box = document.getElementById("summaryBox");
+    const now = new Date();
+    let todayTotal = 0, weekTotal = 0, monthTotal = 0, allTotal = 0;
+    let bySource = { "Zelle":0, "Cash App":0, "Venmo":0, "PayPal":0 };
+
+    records.forEach(r => {
+      const d = new Date(r.timestamp);
+      allTotal += r.amount;
+
+      if (d.toDateString() === now.toDateString()) {
+        todayTotal += r.amount;
+        if (bySource[r.source] != null) bySource[r.source] += r.amount;
+      }
+
+      const diffDays = (now - d) / (1000*60*60*24);
+      if (diffDays < 7) weekTotal += r.amount;
+      if (d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear())
+        monthTotal += r.amount;
+    });
+
+    box.innerHTML = `
+      <div>今日总计：$${todayTotal.toFixed(2)}</div>
+      <div>今日 Zelle：$${bySource["Zelle"].toFixed(2)}</div>
+      <div>今日 Cash App：$${bySource["Cash App"].toFixed(2)}</div>
+      <div>今日 Venmo：$${bySource["Venmo"].toFixed(2)}</div>
+      <div>今日 PayPal：$${bySource["PayPal"].toFixed(2)}</div>
+      <div>本周：$${weekTotal.toFixed(2)}　本月：$${monthTotal.toFixed(2)}</div>
+      <div>总计：$${allTotal.toFixed(2)}　总笔数：${records.length}</div>
+    `;
+  }
+
+  render();
+</script>
+
+</body>
+</html>
