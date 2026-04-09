@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>收款整理（四合一）</title>
+
+<style>
+body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto;
+    margin: 0;
+    background: #f5f5f5;
+}
+
+/* 顶部统计栏 */
+.header {
+    padding: 15px;
+    background: #ffffff;
+    box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+}
+.header h2 {
+    margin: 0;
+    font-size: 20px;
+}
+.stats {
+    margin-top: 10px;
+    font-size: 16px;
+}
+
+/* 输入区 */
+.input-area {
+    padding: 15px;
+}
+textarea {
+    width: 100%;
+    height: 90px;
+    padding: 10px;
+    border-radius: 8px;
+    border: 1px solid #ccc;
+    font-size: 15px;
+}
+
+/* 按钮 */
+button {
+    width: 100%;
+    padding: 12px;
+    margin-top: 10px;
+    border: none;
+    border-radius: 8px;
+    font-size: 16px;
+    color: white;
+}
+.parse-btn { background: #007aff; }
+.export-btn { background: #ff9500; }
+
+/* 记录卡片 */
+.record {
+    margin: 12px;
+    padding: 15px;
+    border-radius: 10px;
+    color: white;
+}
+.zelle { background: #7B4DFF; }
+.cashapp { background: #00D64B; }
+.venmo { background: #3D95CE; }
+.paypal { background: #F7C948; color: black; }
+
+.record-top {
+    display: flex;
+    justify-content: space-between;
+    font-size: 18px;
+}
+.record-bottom {
+    margin-top: 8px;
+    font-size: 14px;
+}
+
+/* 删除按钮 */
+.delete-btn {
+    margin-top: 8px;
+    background: rgba(0,0,0,0.2);
+    padding: 6px 10px;
+    border-radius: 6px;
+    color: white;
+    font-size: 13px;
+    display: inline-block;
+}
+</style>
+</head>
+
+<body>
+
+<div class="header">
+    <h2 id="title">收款整理</h2>
+    <div class="stats" id="stats">今日：$0 ｜ 本月：$0 ｜ 总计：$0</div>
+</div>
+
+<div class="input-area">
+    <textarea id="smsInput" placeholder="粘贴短信内容（Zelle / Cash App / Venmo / PayPal）"></textarea>
+    <button class="parse-btn" onclick="parseSMS()">自动识别并加入</button>
+    <button class="export-btn" onclick="exportData()">导出记录</button>
+</div>
+
+<div id="records"></div>
+
+<script>
+let data = JSON.parse(localStorage.getItem("payments") || "[]");
+
+/* 保存 */
+function save() {
+    localStorage.setItem("payments", JSON.stringify(data));
+    render();
+}
+
+/* 解析短信 */
+function parseSMS() {
+    let text = document.getElementById("smsInput").value.trim();
+    if (!text) return;
+
+    let platform = "";
+    let amount = 0;
+    let name = "Unknown";
+    let date = new Date().toLocaleDateString();
+
+    /* Zelle */
+    if (/Zelle|sent you|You received/i.test(text)) {
+        platform = "zelle";
+        let m = text.match(/\$([\d\.]+)/);
+        if (m) amount = parseFloat(m[1]);
+        let n = text.match(/from ([A-Za-z ]+)/i);
+        if (n) name = n[1];
+    }
+
+    /* Cash App */
+    else if (/Cash App|You received a payment/i.test(text)) {
+        platform = "cashapp";
+        let m = text.match(/\$([\d\.]+)/);
+        if (m) amount = parseFloat(m[1]);
+        let n = text.match(/from ([A-Za-z ]+)/i);
+        if (n) name = n[1];
+    }
+
+    /* Venmo */
+    else if (/Venmo|paid you/i.test(text)) {
+        platform = "venmo";
+        let m = text.match(/\$([\d\.]+)/);
+        if (m) amount = parseFloat(m[1]);
+        let n = text.match(/from ([A-Za-z ]+)/i);
+        if (n) name = n[1];
+    }
+
+    /* PayPal */
+    else if (/PayPal|received a payment/i.test(text)) {
+        platform = "paypal";
+        let m = text.match(/\$([\d\.]+)/);
+        if (m) amount = parseFloat(m[1]);
+        let n = text.match(/from ([A-Za-z ]+)/i);
+        if (n) name = n[1];
+    }
+
+    if (!platform || !amount) {
+        alert("无法识别，请检查短信内容");
+        return;
+    }
+
+    data.push({ platform, amount, name, date });
+    save();
+    document.getElementById("smsInput").value = "";
+}
+
+/* 删除记录 */
+function deleteRecord(i) {
+    data.splice(i, 1);
+    save();
+}
+
+/* 渲染记录 */
+function render() {
+    let box = document.getElementById("records");
+    box.innerHTML = "";
+
+    let today = new Date().toLocaleDateString();
+    let month = new Date().getMonth();
+
+    let totalToday = 0, totalMonth = 0, totalAll = 0;
+
+    data.forEach((r, i) => {
+        totalAll += r.amount;
+        if (r.date === today) totalToday += r.amount;
+        if (new Date(r.date).getMonth() === month) totalMonth += r.amount;
+
+        let div = document.createElement("div");
+        div.className = `record ${r.platform}`;
+        div.innerHTML = `
+            <div class="record-top">
+                <div>$${r.amount}</div>
+                <div>${r.platform.toUpperCase()}</div>
+            </div>
+            <div class="record-bottom">${r.name} ｜ ${r.date}</div>
+            <div class="delete-btn" onclick="deleteRecord(${i})">删除</div>
+        `;
+        box.appendChild(div);
+    });
+
+    document.getElementById("stats").innerText =
+        `今日：$${totalToday} ｜ 本月：$${totalMonth} ｜ 总计：$${totalAll}`;
+}
+
+/* 导出 */
+function exportData() {
+    let text = JSON.stringify(data, null, 2);
+    let blob = new Blob([text], { type: "text/plain" });
+    let url = URL.createObjectURL(blob);
+
+    let a = document.createElement("a");
+    a.href = url;
+    a.download = "payments_backup.txt";
+    a.click();
+}
+
+render();
+</script>
+
+</body>
+</html>
